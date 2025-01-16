@@ -1,0 +1,69 @@
+# Function to log messages
+function Log-Message {
+    param(
+        [string]$Message
+    )
+    $TimeStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host "$TimeStamp - $Message"
+}
+
+# Function to handle errors
+function Handle-Error {
+    param(
+        [string]$ErrorMessage
+    )
+    Log-Message "Error: $ErrorMessage"
+    exit 1
+}
+
+# Function to resume BitLocker protection
+function Resume-BitLockerProtection {
+    param(
+        [string]$MountPoint
+    )
+    try {
+        Resume-BitLocker -MountPoint $MountPoint -ErrorAction Stop
+        Log-Message "BitLocker protection resumed on drive $MountPoint"
+    }
+    catch {
+        Handle-Error "Failed to resume BitLocker protection on drive $MountPoint. $_"
+    }
+}
+
+# Main script
+try {
+    # Parameters
+    $MountPoint = "C:"
+    
+    # Suspend BitLocker protection
+    Log-Message "Suspending BitLocker protection on drive $MountPoint..."
+    Suspend-BitLocker -MountPoint $MountPoint -RebootCount 0 -ErrorAction Stop
+    Log-Message "BitLocker protection suspended successfully."
+
+    # Retrieve BitLocker volume information
+    Log-Message "Retrieving BitLocker volume information..."
+    $BLV = Get-BitlockerVolume -MountPoint $MountPoint -ErrorAction Stop
+
+    # Find TPM PIN key protector
+    $TpmPinKeyProtector = $BLV.KeyProtector | Where-Object {$_.KeyProtectorType -eq "TpmPin"}
+    if ($TpmPinKeyProtector -eq $null) {
+        Log-Message "No TPM PIN key protector found. Skipping removal step."
+    }
+    else {
+        # Remove TPM PIN key protector
+        Log-Message "Removing TPM PIN key protector..."
+        Remove-BitLockerKeyProtector -MountPoint $MountPoint -KeyProtectorId $TpmPinKeyProtector.KeyProtectorId -ErrorAction Stop
+        Log-Message "TPM PIN key protector removed successfully."
+    }
+
+    # Add TPM as a key protector
+    Log-Message "Adding TPM as a key protector..."
+    Add-BitLockerKeyProtector -MountPoint $MountPoint -TpmProtector -ErrorAction Stop
+    Log-Message "TPM added as a key protector successfully."
+
+    # Resume BitLocker protection
+    Resume-BitLockerProtection -MountPoint $MountPoint
+}
+catch {
+    Handle-Error "An unexpected error occurred: $_"
+}
