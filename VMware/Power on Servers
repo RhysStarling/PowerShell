@@ -1,0 +1,16 @@
+#Needs VMwares Power CLI module 
+
+Import-Module VMware.VimAutomation.Core
+
+Connect-VIServer -Server #servername#
+
+# List of VMs to shut down
+$vmNames = @(
+    "Example1",
+    "Example2"
+)
+
+# Shut down each VM in the list
+foreach ($vmName in $vmNames) {
+    Stop-VMGuest -VM $vmName -Confirm:$false
+}
