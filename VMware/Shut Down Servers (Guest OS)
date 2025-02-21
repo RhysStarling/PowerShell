@@ -1,4 +1,4 @@
-#Needs VMwares Power CLI module 
+# Requires VMwares Power CLI module 
 
 Import-Module VMware.VimAutomation.Core
 
