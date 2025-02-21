@@ -1,0 +1,84 @@
+# Define parameters
+$resourceGroupName = "RG-Name"
+$vaultName = "Vault-Name"
+$startDate = (Get-Date).AddDays(-2461)
+$endDate = Get-Date
+$outputFilePath = "C:\temp\RecoveryPointsOutput.csv"
+
+try {
+    # Get the Azure Recovery Services Vault
+    $vault = Get-AzRecoveryServicesVault -ResourceGroupName $resourceGroupName -Name $vaultName
+
+    if (-not $vault) {
+        Write-Error "Vault not found."
+        return
+    }
+
+    # Retrieve all backup containers of type AzureVM in the specified vault
+    $containers = Get-AzRecoveryServicesBackupContainer -ContainerType AzureVM -VaultId $vault.ID
+
+    if (-not $containers) {
+        Write-Error "No backup containers found."
+        return
+    }
+
+    # Initialize an array to store all recovery points
+    $allRecoveryPoints = @()
+
+    # Loop through each container
+    foreach ($container in $containers) {
+        Write-Output "Processing container: $($container.Name)"
+        try {
+            # Retrieve the backup items associated with the container
+            $backupItems = Get-AzRecoveryServicesBackupItem -Container $container -WorkloadType AzureVM -VaultId $vault.ID
+
+            if (-not $backupItems) {
+                Write-Output "No backup items found for container: $($container.Name)"
+                continue
+            }
+
+            # Loop through each backup item
+            foreach ($backupItem in $backupItems) {
+                Write-Output "Processing backup item: $($backupItem.Name)"
+                try {
+                    # Retrieve the recovery points for the backup item within the specified date range
+                    $recoveryPoints = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupItem -StartDate $startDate.ToUniversalTime() -EndDate $endDate.ToUniversalTime() -VaultId $vault.ID
+                    
+                    if ($recoveryPoints) {
+                        # Select specific properties to export to CSV
+                        $recoveryPoints | ForEach-Object {
+                            [PSCustomObject]@{
+                                ContainerName = $container.Name
+                                BackupItemName = $backupItem.Name
+                                RecoveryPointId = $_.Id
+                                RecoveryPointTime = $_.RecoveryPointTime
+                                RecoveryPointType = $_.RecoveryPointType
+                                IsBookmarked = $_.IsBookmarked
+                            }
+                        } | ForEach-Object {
+                            $allRecoveryPoints += $_
+                        }
+                    }
+                }
+                catch {
+                    Write-Error "Failed to retrieve recovery points for backup item: $($backupItem.Name). $_"
+                }
+            }
+        }
+        catch {
+            Write-Error "Failed to retrieve backup items for container: $($container.Name). $_"
+        }
+    }
+
+    # Export all recovery points to a CSV file
+    if ($allRecoveryPoints.Count -gt 0) {
+        $allRecoveryPoints | Export-Csv -Path $outputFilePath -NoTypeInformation
+        Write-Output "Recovery points exported to $outputFilePath"
+    }
+    else {
+        Write-Output "No recovery points found to export."
+    }
+}
+catch {
+    Write-Error "An error occurred: $_"
+}
