@@ -1,0 +1,144 @@
+# Suppress VMware CEIP warning
+Set-PowerCLIConfiguration -Scope User -ParticipateInCEIP $false -Confirm:$false
+
+# Start the transcript to capture output
+Write-Output "Starting the transcript..."
+Start-Transcript -Path "C:\TEMP\transcript.txt" -Force
+
+# Define vCenter server
+$vCenter = "VCENTERESERVER"
+
+# Connect to vCenter
+Write-Host "Connecting to vCenter: $vCenter..."
+try {
+    $connection = Connect-VIServer -Server $vCenter -Force
+    Write-Host "Connected to $vCenter successfully." -ForegroundColor Green
+} catch {
+    Write-Host "Failed to connect to vCenter: $($_.Exception.Message)" -ForegroundColor Red
+    exit
+}
+
+# Function to get VM snapshot report
+function Get-VMSnapshotReport {
+    $vmSnapshots = @()
+    $vms = Get-VM
+    foreach ($vm in $vms) {
+        $snapshots = $vm | Get-Snapshot
+        foreach ($snapshot in $snapshots) {
+            $vmSnapshots += [PSCustomObject]@{
+                VMName             = $vm.Name
+                SnapshotName       = $snapshot.Name
+                SnapshotDate       = $snapshot.Created
+                SnapshotDescription = $snapshot.Description
+            }
+        }
+    }
+    return $vmSnapshots
+}
+
+# Get the VM snapshot report
+$snapshotResults = Get-VMSnapshotReport
+
+# Generate HTML table for snapshot report
+$htmlTableSnapshots = "<table border='1' cellpadding='5' cellspacing='0' style='border-collapse: collapse;'>"
+$htmlTableSnapshots += "<tr style='background-color: #f2f2f2;'><th>VM Name</th><th>Snapshot Name</th><th>Snapshot Date</th><th>Snapshot Description</th></tr>"
+
+foreach ($snapshot in $snapshotResults) {
+    $htmlTableSnapshots += "<tr>
+        <td>$($snapshot.VMName)</td>
+        <td>$($snapshot.SnapshotName)</td>
+        <td>$($snapshot.SnapshotDate)</td>
+        <td>$($snapshot.SnapshotDescription)</td>
+    </tr>"
+}
+
+$htmlTableSnapshots += "</table>"
+
+# Get all entities that may have alarms
+$entities = @()
+$entities += Get-VM
+$entities += Get-VMHost
+$entities += Get-Datacenter
+$entities += Get-Datastore
+
+# Initialize results array for alarms
+$alarmResults = @()
+
+# Loop through each entity and check for triggered alarms
+foreach ($entity in $entities) {
+    if ($entity.ExtensionData.TriggeredAlarmState.Count -gt 0) {
+        foreach ($alarm in $entity.ExtensionData.TriggeredAlarmState) {
+            $alarmResults += [PSCustomObject]@{
+                Entity      = (Get-View $alarm.Entity).Name
+                Alarm       = (Get-View $alarm.Alarm).Info.Name
+                AlarmStatus = $alarm.OverallStatus
+                AlarmMoRef  = $alarm.Alarm
+                EntityMoRef = $alarm.Entity
+            }
+        }
+    }
+}
+
+# Generate HTML table for alarm report
+$htmlTableAlarms = "<table border='1' cellpadding='5' cellspacing='0' style='border-collapse: collapse;'>"
+$htmlTableAlarms += "<tr style='background-color: #f2f2f2;'><th>Entity</th><th>Alarm</th><th>Status</th><th>AlarmMoRef</th><th>EntityMoRef</th></tr>"
+
+foreach ($result in $alarmResults) {
+    $rowColor = "#FFFFFF"  # Default white
+
+    if ($result.AlarmStatus -eq "red") {
+        $rowColor = "#FF9999"  # Light red for critical alarms
+    } elseif ($result.AlarmStatus -eq "yellow") {
+        $rowColor = "#FFFF99"  # Light yellow for warnings
+    }
+
+    $htmlTableAlarms += "<tr style='background-color: $rowColor;'>
+        <td>$($result.Entity)</td>
+        <td>$($result.Alarm)</td>
+        <td>$($result.AlarmStatus)</td>
+        <td>$($result.AlarmMoRef)</td>
+        <td>$($result.EntityMoRef)</td>
+    </tr>"
+}
+
+$htmlTableAlarms += "</table>"
+
+# Define email parameters
+$smtpServer = "SMTPSERVER"
+$smtpPort = 25
+$from = "SENDEREMAIL"
+$to = "RECEIPIENTEMAIL"
+$subject = "vCenter Reports"
+
+# Combine both reports into the email body with snapshot on top
+$body = "Please find below the VM Snapshots Report:<br><br>$htmlTableSnapshots<br><br>Please find below the vCenter Triggered Alarms Report:<br><br>$htmlTableAlarms"
+
+# Create the email message
+$message = New-Object System.Net.Mail.MailMessage
+$message.From = $from
+$message.To.Add($to)
+$message.Subject = $subject
+$message.Body = $body
+$message.IsBodyHtml = $true
+
+# Create the SMTP client
+$smtp = New-Object Net.Mail.SmtpClient($smtpServer, $smtpPort)
+
+# Send the email
+try {
+    $smtp.Send($message)
+    Write-Host "Email sent successfully!" -ForegroundColor Green
+} catch {
+    Write-Host "Failed to send email: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Disconnect from vCenter
+Write-Host "Disconnecting from vCenter..."
+Disconnect-VIServer -Server $vCenter -Confirm:$false
+Write-Host "Disconnected from vCenter."
+
+
+# Stop the transcript to capture everything
+Write-Output "Stopping transcript..."
+Stop-Transcript
+
