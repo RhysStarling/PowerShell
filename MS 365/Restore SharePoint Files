@@ -1,0 +1,21 @@
+# Connect to the SharePoint Online site using PnP PowerShell and web login authentication.
+# Replace "https://URLHERE" with the URL of the SharePoint site.
+Connect-PnPOnline -Url https://URLHERE -UseWebLogin
+
+# Get the current date and time.
+$today = Get-Date
+
+# Define the date range for filtering deleted items in the recycle bin.
+# $dateFrom: Start date, 11 days before today's date.
+$dateFrom = $today.Date.AddDays(-11)
+
+# $dateTo: End date, 1 day before today's date.
+$dateTo = $today.Date.AddDays(-1)
+
+# Retrieve recycle bin items within the specified date range that match specific criteria:
+# 1. The item was deleted between $dateFrom and $dateTo.
+# 2. The item was deleted by the user with the email 'rhys.starling@nodomain.com'.
+Get-PnPRecycleBinItem | Where-Object {
+    ($_.DeletedDate -gt $dateFrom -and $_.DeletedDate -lt $dateTo) -and  # Filter by deleted date range.
+    ($_.DeletedByEmail -eq 'rhys.starling@nodomain.com')          # Filter by email of the user who deleted the item.
+} | Restore-PnpRecycleBinItem -Force                                     # Restore matching items and bypass confirmation prompts.

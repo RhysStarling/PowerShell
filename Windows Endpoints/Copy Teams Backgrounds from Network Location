@@ -1,0 +1,89 @@
+<#
+.Description
+    Logon script that downloads MS Teams Backgrounds for the user.
+VERSION CHANGES
+v1.0.000    16/02/2024   (Rhys Starling)
+#>
+
+$content = @'
+<#
+.Description
+    Copy Teams Backgrounds from on-prem file share to new Teams background folder. Checks connection to a domain controller to ensure files can be accessed. This script was used as a log-on script which is why it includes the file hash check to make sure it wasn't copying files that already exist in the desitnation location.
+.Notes
+VERSION CHANGES
+v1.0.000    16/02/2024  (Rhys Starling)
+* First version published
+#>
+
+$attempts = 0
+$threshold = 60
+
+# Loop to test VPN connection until it connects or the threshold is reached
+Do {
+    $VPNConnection1 = Test-Connection <DC_IP_ADDRESS> -Quiet
+    Start-Sleep -Seconds 5
+    $attempts++
+
+    if ($attempts -eq $threshold) {
+        Break
+    }
+} Until ($VPNConnection1 -eq $true)
+
+# Check if VPN connection is successful
+if ($VPNConnection1 -eq $true) {
+    Write-Host "VPN Connected"
+
+    # Define source and destination folders for backgrounds
+    $SourceFolder = "\\<DOMAIN_NAME>\network\Teams Backgrounds"
+    $DestinationFolder = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData) + "\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Backgrounds\Uploads"
+
+    # Check if the destination folder exists
+    if (-not (Test-Path -Path $DestinationFolder -PathType Container)) {
+        Write-Host "Destination folder does not exist. Exiting script."
+        Exit
+    }
+
+    # Remove files created before 14/02/2024 from the destination folder
+    $OldFiles = Get-ChildItem -Path $DestinationFolder | Where-Object { $_.CreationTime -lt [datetime]"2024-03-04" }
+    $OldFiles | Remove-Item -Force
+
+    # Get all files in the source folder
+    $SourceFiles = Get-ChildItem -Path $SourceFolder -File -Recurse
+
+    # Get all files in the destination folder
+    $DestinationFiles = Get-ChildItem -Path $DestinationFolder -File -Recurse
+
+    # Loop through each file in the source folder
+    foreach ($sourceFile in $SourceFiles) {
+        # Calculate hash of the current source file
+        $sourceFileHash = Get-FileHash -Path $sourceFile.FullName -Algorithm SHA256
+
+        # Check if the source file already exists in the destination folder by comparing hashes
+        $fileExistsInDestination = $false
+        foreach ($destinationFile in $DestinationFiles) {
+            # Calculate hash of the current destination file
+            $destinationFileHash = Get-FileHash -Path $destinationFile.FullName -Algorithm SHA256
+
+            # Compare file hashes
+            if ($sourceFileHash.Hash -eq $destinationFileHash.Hash) {
+                $fileExistsInDestination = $true
+                break  # No need to continue checking other destination files
+            }
+        }
+
+        # Copy the file from source to destination if it doesn't exist in the destination folder or their hashes differ
+        if (-not $fileExistsInDestination) {
+            Write-Host "$($sourceFile.Name) file doesn't exist in destination folder or their hashes differ, copying from source"
+            $copiedFile = Copy-Item -Path $sourceFile.FullName -Destination $DestinationFolder -PassThru
+
+            # Update creation time of the copied file to current time
+            $copiedFile.CreationTime = Get-Date
+            $copiedFile.LastWriteTime = Get-Date
+            $copiedFile.LastAccessTime = Get-Date
+        } else {
+            Write-Host "$($sourceFile.Name) file already exists in destination folder and their hashes match, skipping copy"
+        }
+    }
+} else {
+    Write-Host "VPN connection failed"
+}

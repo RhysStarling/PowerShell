@@ -1,0 +1,15 @@
+# Run the netsh command to get the WLAN interface details
+$interfaceDetails = netsh wlan show interfaces
+
+# Extract the interface name from the output
+$interfaceName = $interfaceDetails | Select-String -Pattern '^\s*Name\s*:\s*(.*)$' | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }
+
+if ($null -ne $interfaceName) {
+    # If WLAN interface is found, set the profile order
+    $profileName = "Example Staff"
+    $priority = 1
+    $command = "netsh wlan set profileorder name=""$profileName"" interface=""$interfaceName"" priority=$priority"
+    & cmd /c $command
+} else {
+    Write-Output "No WLAN interface found."
+}
